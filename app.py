@@ -1,19 +1,44 @@
-import os
-import random
-from datetime import datetime
-
-from flask import Flask, redirect, render_template, request, session, url_for
-from flask_migrate import Migrate
+from flask import Flask, render_template, request, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from functools import wraps
+import msal
+import uuid
+import os
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///chatrooms.db")
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///chatrooms.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-only-insecure-key')
+
+# ── Microsoft Entra ID Configuration ─────────────────────────
+CLIENT_ID     = os.environ.get('CLIENT_ID')
+CLIENT_SECRET = os.environ.get('CLIENT_SECRET')
+TENANT_ID     = os.environ.get('TENANT_ID', 'common')
+AUTHORITY     = f'https://login.microsoftonline.com/{TENANT_ID}'
+SCOPE         = ['User.Read']   # Ask for permission to read the user's profile
+
+def _build_msal_app():
+    """Create an MSAL ConfidentialClientApplication instance."""
+    return msal.ConfidentialClientApplication(
+        CLIENT_ID,
+        authority=AUTHORITY,
+        client_credential=CLIENT_SECRET
+    )
+
+def login_required(f):
+    """Decorator: redirect to Microsoft login if user is not in session."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            # Save where the user was trying to go
+            session['next'] = request.url
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
-
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
@@ -62,16 +87,74 @@ ANIMALS = [
 
 def get_nickname():
     if "nickname" not in session:
-        adj    = random.choice(ADJECTIVES)
-        animal = random.choice(ANIMALS)
-        num    = random.randint(10, 99)
-        session["nickname"] = f"{adj}{animal}{num}"
+        session["nickname"] = session['user']['name']
+        # adj    = random.choice(ADJECTIVES)
+        # animal = random.choice(ANIMALS)
+        # num    = random.randint(10, 99)
+        # session["nickname"] = f"{adj}{animal}{num}"
     return session["nickname"]
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+@app.route('/login')
+def login():
+    """Redirect the user to Microsoft's login page."""
+    # Generate a random state value to prevent CSRF attacks
+    session['state'] = str(uuid.uuid4())
+
+    auth_url = _build_msal_app().get_authorization_request_url(
+        SCOPE,
+        state=session['state'],
+        redirect_uri=url_for('callback', _external=True)
+    )
+    return redirect(auth_url)
+
+@app.route('/callback')
+def callback():
+    """Microsoft redirects here after the user logs in."""
+
+    # Security check: verify the state matches to prevent CSRF
+    if request.args.get('state') != session.get('state'):
+        return redirect(url_for('index'))
+
+    # Check if Microsoft returned an error (e.g. user cancelled login)
+    if 'error' in request.args:
+        error_msg = request.args.get('error_description', request.args.get('error'))
+        return f'<h2>Login Error</h2><p>{error_msg}</p><a href="/">Return home</a>'
+
+    # Exchange the authorization code for an ID token
+    result = _build_msal_app().acquire_token_by_authorization_code(
+        request.args['code'],
+        scopes=SCOPE,
+        redirect_uri=url_for('callback', _external=True)
+    )
+
+    if 'error' in result:
+        return f'<h2>Token Error</h2><p>{result.get("error_description")}</p>'
+
+    # Store the token claims in the session (contains name, email, etc.)
+    session['user'] = result.get('id_token_claims')
+
+    # Redirect to where the user was trying to go, or the home page
+    next_page = session.pop('next', None)
+    return redirect(next_page or url_for('index'))
+
+@app.route('/logout')
+def logout():
+    """Clear the local session and sign out of Microsoft."""
+    session.clear()
+    # Redirect to Microsoft's logout endpoint so the browser session is fully cleared
+    logout_url = (
+        AUTHORITY
+        + '/oauth2/v2.0/logout'
+        + '?post_logout_redirect_uri='
+        + url_for('index', _external=True)
+    )
+    return redirect(logout_url)
+
 @app.route("/", methods=["GET", "POST"])
+@login_required
 def index():
     nickname = get_nickname()
     error = None
@@ -91,6 +174,7 @@ def index():
 
 
 @app.route("/room/<int:room_id>", methods=["GET", "POST"])
+@login_required
 def room(room_id):
     r        = Room.query.get_or_404(room_id)
     nickname = get_nickname()
