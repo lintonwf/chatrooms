@@ -5,6 +5,7 @@ from functools import wraps
 import msal
 import uuid
 import os
+import datetime
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///chatrooms.db')
@@ -47,7 +48,7 @@ class Room(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     name       = db.Column(db.String(120), nullable=False, unique=True)
     created_by = db.Column(db.String(80),  nullable=False)
-    created_at = db.Column(db.DateTime,    default=datetime.utcnow)
+    created_at = db.Column(db.DateTime,    default=datetime.datetime.now(datetime.UTC))
     messages   = db.relationship(
         "Message", backref="room", lazy="dynamic",
         cascade="all, delete-orphan"
@@ -69,7 +70,7 @@ class Message(db.Model):
     room_id   = db.Column(db.Integer, db.ForeignKey("rooms.id"), nullable=False)
     author    = db.Column(db.String(80), nullable=False)
     content   = db.Column(db.Text,      nullable=False)
-    posted_at = db.Column(db.DateTime,  default=datetime.utcnow)
+    posted_at = db.Column(db.DateTime,  default=datetime.datetime.now(datetime.UTC))
 
 
 # ── Nickname helper ───────────────────────────────────────────────────────────
