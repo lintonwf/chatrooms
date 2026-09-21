@@ -34,19 +34,19 @@
 </head>
 <body>
   <header>
-    <h1>&#128172; ChatRooms</h1>
-    <span class="nick">You are: <strong>{{ nickname }}</strong></span>
+    <!-- <h1>&#128172; ChatRooms</h1>
+    <span class="nick">You are: <strong>{{ nickname }}</strong></span> -->
+    <nav style="background:#0A2342; color:white; padding:10px 20px; display:flex; justify-content:space-between; align-items:center;">
+      <span style="font-weight:bold; font-size:1.1em;">💬 ChatRooms</span>
+      <span>
+        Signed in as <strong>{{ session['user']['name'] }}</strong>
+        &nbsp;|&nbsp;
+        <a href="{{ url_for('logout') }}" style="color:#FFC107;">Sign out</a>
+      </span>
+    </nav>
   </header>
   <main>
     {% block content %}{% endblock %}
   </main>
 </body>
-<nav style="background:#0A2342; color:white; padding:10px 20px; display:flex; justify-content:space-between; align-items:center;">
-  <span style="font-weight:bold; font-size:1.1em;">💬 ChatRooms</span>
-  <span>
-    Signed in as <strong>{{ session['user']['name'] }}</strong>
-    &nbsp;|&nbsp;
-    <a href="{{ url_for('logout') }}" style="color:#FFC107;">Sign out</a>
-  </span>
-</nav>
 </html>
